@@ -381,7 +381,7 @@
     let score = 0;
     let bestScore = 0;
     let audioContext = null;
-    let mergedThisMove = false;
+    let mergesThisMove = 0;
 
     function initGrid() {
       grid = Array.from({ length: size }, () => Array(size).fill(0));
@@ -438,7 +438,7 @@
           row[i] *= 2;
           row[i + 1] = 0;
           score += row[i];
-          mergedThisMove = true;
+          mergesThisMove += 1;
         }
       }
       return row;
@@ -464,7 +464,7 @@
       }
     }
 
-    async function playMergeSound() {
+    async function playMergeSound(index = 0) {
       const context = getAudioContext();
       if (!context) return;
 
@@ -474,17 +474,17 @@
 
       if (context.state !== 'running') return;
 
-      const now = context.currentTime;
+      const now = context.currentTime + index * 0.08;
       const oscillator = context.createOscillator();
       const gain = context.createGain();
 
-      oscillator.type = 'sine';
-      oscillator.frequency.setValueAtTime(660, now);
-      oscillator.frequency.exponentialRampToValueAtTime(990, now + 0.08);
+      oscillator.type = 'triangle';
+      oscillator.frequency.setValueAtTime(740, now);
+      oscillator.frequency.exponentialRampToValueAtTime(1180, now + 0.08);
 
       gain.gain.setValueAtTime(0.001, now);
-      gain.gain.exponentialRampToValueAtTime(0.18, now + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+      gain.gain.exponentialRampToValueAtTime(0.35, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
 
       oscillator.connect(gain);
       gain.connect(context.destination);
@@ -493,7 +493,7 @@
         gain.disconnect();
       });
       oscillator.start(now);
-      oscillator.stop(now + 0.18);
+      oscillator.stop(now + 0.24);
     }
 
     function moveLeft() {
@@ -549,13 +549,15 @@
 
     function handleMove(moveFn) {
       unlockAudio();
-      mergedThisMove = false;
+      mergesThisMove = 0;
       const moved = moveFn();
       if (!moved) return;
       addRandomTile();
       updateBoard();
-      if (mergedThisMove) {
-        void playMergeSound();
+      if (mergesThisMove > 0) {
+        for (let i = 0; i < mergesThisMove; i++) {
+          void playMergeSound(i);
+        }
       }
       if (!canMove()) {
         setTimeout(() => alert('游戏结束！再试一次，继续锻炼逻辑思维吧！'), 100);
