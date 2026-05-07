@@ -136,7 +136,15 @@
       padding: 4px;
       flex: 1;
       min-height: 0;
-      margin-bottom: 26px;      touch-action: none;    }
+      margin-bottom: 26px;
+      touch-action: none;
+      cursor: grab;
+      user-select: none;
+    }
+
+    .board.dragging {
+      cursor: grabbing;
+    }
 
     .tile {
       aspect-ratio: 1;
@@ -372,6 +380,8 @@
     let grid = [];
     let score = 0;
     let bestScore = 0;
+    let audioContext = null;
+    let mergedThisMove = false;
 
     function initGrid() {
       grid = Array.from({ length: size }, () => Array(size).fill(0));
@@ -428,9 +438,62 @@
           row[i] *= 2;
           row[i + 1] = 0;
           score += row[i];
+          mergedThisMove = true;
         }
       }
       return row;
+    }
+
+    function getAudioContext() {
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextClass) return null;
+
+      if (!audioContext) {
+        audioContext = new AudioContextClass();
+      }
+
+      return audioContext;
+    }
+
+    function unlockAudio() {
+      const context = getAudioContext();
+      if (!context) return;
+
+      if (context.state === 'suspended') {
+        context.resume().catch(() => {});
+      }
+    }
+
+    async function playMergeSound() {
+      const context = getAudioContext();
+      if (!context) return;
+
+      if (context.state === 'suspended') {
+        await context.resume().catch(() => {});
+      }
+
+      if (context.state !== 'running') return;
+
+      const now = context.currentTime;
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(660, now);
+      oscillator.frequency.exponentialRampToValueAtTime(990, now + 0.08);
+
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.exponentialRampToValueAtTime(0.18, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
+
+      oscillator.connect(gain);
+      gain.connect(context.destination);
+      oscillator.addEventListener('ended', () => {
+        oscillator.disconnect();
+        gain.disconnect();
+      });
+      oscillator.start(now);
+      oscillator.stop(now + 0.18);
     }
 
     function moveLeft() {
@@ -485,22 +548,31 @@
     }
 
     function handleMove(moveFn) {
+      unlockAudio();
+      mergedThisMove = false;
       const moved = moveFn();
       if (!moved) return;
       addRandomTile();
       updateBoard();
+      if (mergedThisMove) {
+        void playMergeSound();
+      }
       if (!canMove()) {
         setTimeout(() => alert('游戏结束！再试一次，继续锻炼逻辑思维吧！'), 100);
       }
     }
 
-    btnRestart.addEventListener('click', initGrid);
+    btnRestart.addEventListener('click', () => {
+      unlockAudio();
+      initGrid();
+    });
 
     const helpBtn = document.getElementById('helpBtn');
     const modalMask = document.getElementById('modalMask');
     const closeModal = document.getElementById('closeModal');
 
     helpBtn.addEventListener('click', () => {
+      unlockAudio();
       modalMask.style.display = 'flex';
     });
 
@@ -514,21 +586,17 @@
       }
     });
 
-    let touchStartX = 0;
-    let touchStartY = 0;
+    let pointerStartX = 0;
+    let pointerStartY = 0;
+    let activePointerId = null;
 
-    boardElement.addEventListener('touchstart', (event) => {
-      const touch = event.changedTouches[0];
-      touchStartX = touch.clientX;
-      touchStartY = touch.clientY;
-    }, { passive: true });
-
-    boardElement.addEventListener('touchend', (event) => {
-      const touch = event.changedTouches[0];
-      const dx = touch.clientX - touchStartX;
-      const dy = touch.clientY - touchStartY;
+    function handleSwipe(startX, startY, endX, endY) {
+      const dx = endX - startX;
+      const dy = endY - startY;
       const threshold = 30;
+
       if (Math.abs(dx) < threshold && Math.abs(dy) < threshold) return;
+
       if (Math.abs(dx) > Math.abs(dy)) {
         if (dx > 0) handleMove(moveRight);
         else handleMove(moveLeft);
@@ -536,11 +604,47 @@
         if (dy > 0) handleMove(moveDown);
         else handleMove(moveUp);
       }
-    }, { passive: true });
+    }
+
+    function stopPointerDrag() {
+      activePointerId = null;
+      boardElement.classList.remove('dragging');
+    }
+
+    boardElement.addEventListener('pointerdown', (event) => {
+      if (activePointerId !== null) return;
+      if (event.pointerType === 'mouse' && event.button !== 0) return;
+
+      activePointerId = event.pointerId;
+      pointerStartX = event.clientX;
+      pointerStartY = event.clientY;
+      unlockAudio();
+      boardElement.classList.add('dragging');
+      if (boardElement.setPointerCapture) {
+        boardElement.setPointerCapture(event.pointerId);
+      }
+      event.preventDefault();
+    });
+
+    boardElement.addEventListener('pointerup', (event) => {
+      if (event.pointerId !== activePointerId) return;
+
+      handleSwipe(pointerStartX, pointerStartY, event.clientX, event.clientY);
+      if (boardElement.hasPointerCapture && boardElement.hasPointerCapture(event.pointerId)) {
+        boardElement.releasePointerCapture(event.pointerId);
+      }
+      stopPointerDrag();
+    });
+
+    boardElement.addEventListener('pointercancel', (event) => {
+      if (event.pointerId !== activePointerId) return;
+      stopPointerDrag();
+    });
 
     window.addEventListener('keydown', (event) => {
       if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
         event.preventDefault();
+        unlockAudio();
         if (event.key === 'ArrowUp') handleMove(moveUp);
         if (event.key === 'ArrowDown') handleMove(moveDown);
         if (event.key === 'ArrowLeft') handleMove(moveLeft);
